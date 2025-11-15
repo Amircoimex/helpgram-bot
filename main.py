@@ -3,8 +3,9 @@ import logging
 import requests
 import re
 import time
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, CallbackQueryHandler
+from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, Dispatcher, MessageHandler, Filters
+from telegram.utils.request import Request
 
 # تنظیم لاگ
 logging.basicConfig(
@@ -25,33 +26,34 @@ print("=" * 50)
 
 user_sessions = {}
 
-def start(update, context):
+def start(bot, update):
     keyboard = [
         [InlineKeyboardButton("📱 دریافت شماره تونس", callback_data="get_number")],
         [InlineKeyboardButton("💰 بررسی موجودی", callback_data="check_balance")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    update.message.reply_text(
-        "🤖 به ربات دریافت شماره تونس خوش آمدید!",
+    bot.send_message(
+        chat_id=update.message.chat_id,
+        text="🤖 به ربات دریافت شماره تونس خوش آمدید!",
         reply_markup=reply_markup
     )
 
-def handle_callback(update, context):
+def handle_callback(bot, update):
     query = update.callback_query
     query.answer()
     user_id = query.from_user.id
     
     if query.data == "get_number":
-        get_number(query, user_id)
+        get_number(bot, query, user_id)
     elif query.data == "check_balance":
-        check_balance(query)
+        check_balance(bot, query)
     elif query.data == "get_code":
-        get_sms_code(query, user_id)
+        get_sms_code(bot, query, user_id)
     elif query.data == "back":
-        start_callback(update, context)
+        start_callback(bot, update)
 
-def start_callback(update, context):
+def start_callback(bot, update):
     query = update.callback_query
     keyboard = [
         [InlineKeyboardButton("📱 دریافت شماره تونس", callback_data="get_number")],
@@ -59,14 +61,20 @@ def start_callback(update, context):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    query.edit_message_text(
-        "🤖 به ربات دریافت شماره تونس خوش آمدید!",
+    bot.edit_message_text(
+        chat_id=query.message.chat_id,
+        message_id=query.message.message_id,
+        text="🤖 به ربات دریافت شماره تونس خوش آمدید!",
         reply_markup=reply_markup
     )
 
-def get_number(query, user_id):
+def get_number(bot, query, user_id):
     try:
-        query.edit_message_text("📞 درحال دریافت شماره...")
+        bot.edit_message_text(
+            chat_id=query.message.chat_id,
+            message_id=query.message.message_id,
+            text="📞 درحال دریافت شماره..."
+        )
         
         url = "https://grizzlysms.com/api/v1/order"
         params = {"key": API_KEY, "service": "telegram", "country": "tn"}
@@ -91,32 +99,47 @@ def get_number(query, user_id):
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            query.edit_message_text(
-                f"✅ **شماره دریافت شد!**\n\n"
-                f"📱 **شماره:** `{phone_number}`\n"
-                f"🆔 **Order ID:** `{order_id}`\n\n"
-                f"📝 این شماره را در تلگرام وارد کنید و سپس روی 'دریافت کد تأیید' کلیک کنید.",
+            bot.edit_message_text(
+                chat_id=query.message.chat_id,
+                message_id=query.message.message_id,
+                text=f"✅ **شماره دریافت شد!**\n\n📱 **شماره:** `{phone_number}`\n🆔 **Order ID:** `{order_id}`\n\n📝 این شماره را در تلگرام وارد کنید و سپس روی 'دریافت کد تأیید' کلیک کنید.",
                 reply_markup=reply_markup,
                 parse_mode="Markdown"
             )
         else:
             error_msg = data.get('message', 'خطای ناشناخته')
-            query.edit_message_text(f"❌ خطا در دریافت شماره: {error_msg}")
+            bot.edit_message_text(
+                chat_id=query.message.chat_id,
+                message_id=query.message.message_id,
+                text=f"❌ خطا در دریافت شماره: {error_msg}"
+            )
             
     except Exception as e:
         logger.error(f"Error in get_number: {e}")
-        query.edit_message_text("❌ خطا در ارتباط با سرور")
+        bot.edit_message_text(
+            chat_id=query.message.chat_id,
+            message_id=query.message.message_id,
+            text="❌ خطا در ارتباط با سرور"
+        )
 
-def get_sms_code(query, user_id):
+def get_sms_code(bot, query, user_id):
     try:
         if user_id not in user_sessions:
-            query.edit_message_text("❌ session شما منقضی شده است. لطفاً دوباره شروع کنید.")
+            bot.edit_message_text(
+                chat_id=query.message.chat_id,
+                message_id=query.message.message_id,
+                text="❌ session شما منقضی شده است. لطفاً دوباره شروع کنید."
+            )
             return
             
         order_id = user_sessions[user_id]["order_id"]
         phone_number = user_sessions[user_id]["phone_number"]
         
-        query.edit_message_text("⏳ در حال دریافت کد تأیید... لطفاً منتظر بمانید.")
+        bot.edit_message_text(
+            chat_id=query.message.chat_id,
+            message_id=query.message.message_id,
+            text="⏳ در حال دریافت کد تأیید... لطفاً منتظر بمانید."
+        )
         
         url = "https://grizzlysms.com/api/v1/sms"
         params = {"key": API_KEY, "order_id": order_id}
@@ -143,11 +166,10 @@ def get_sms_code(query, user_id):
                     ]
                     reply_markup = InlineKeyboardMarkup(keyboard)
                     
-                    query.edit_message_text(
-                        f"🎉 **کد تأیید دریافت شد!**\n\n"
-                        f"📱 **شماره:** `{phone_number}`\n"
-                        f"🔢 **کد تأیید:** `{final_code}`\n\n"
-                        f"✅ این کد را در تلگرام وارد کنید.",
+                    bot.edit_message_text(
+                        chat_id=query.message.chat_id,
+                        message_id=query.message.message_id,
+                        text=f"🎉 **کد تأیید دریافت شد!**\n\n📱 **شماره:** `{phone_number}`\n🔢 **کد تأیید:** `{final_code}`\n\n✅ این کد را در تلگرام وارد کنید.",
                         reply_markup=reply_markup,
                         parse_mode="Markdown"
                     )
@@ -159,15 +181,27 @@ def get_sms_code(query, user_id):
                 logger.error(f"Error checking SMS: {e}")
                 time.sleep(10)
         
-        query.edit_message_text("❌ کد تأیید دریافت نشد. لطفاً دوباره تلاش کنید.")
+        bot.edit_message_text(
+            chat_id=query.message.chat_id,
+            message_id=query.message.message_id,
+            text="❌ کد تأیید دریافت نشد. لطفاً دوباره تلاش کنید."
+        )
         
     except Exception as e:
         logger.error(f"Error in get_sms_code: {e}")
-        query.edit_message_text("❌ خطا در دریافت کد")
+        bot.edit_message_text(
+            chat_id=query.message.chat_id,
+            message_id=query.message.message_id,
+            text="❌ خطا در دریافت کد"
+        )
 
-def check_balance(query):
+def check_balance(bot, query):
     try:
-        query.edit_message_text("💰 در حال بررسی موجودی...")
+        bot.edit_message_text(
+            chat_id=query.message.chat_id,
+            message_id=query.message.message_id,
+            text="💰 در حال بررسی موجودی..."
+        )
         
         url = "https://grizzlysms.com/api/v1/balance"
         params = {"key": API_KEY}
@@ -185,30 +219,46 @@ def check_balance(query):
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            query.edit_message_text(
-                f"💳 **موجودی حساب:**\n\n"
-                f"💰 **مبلغ:** {balance} {currency}\n\n"
-                f"برای دریافت شماره جدید از دکمه زیر استفاده کنید:",
+            bot.edit_message_text(
+                chat_id=query.message.chat_id,
+                message_id=query.message.message_id,
+                text=f"💳 **موجودی حساب:**\n\n💰 **مبلغ:** {balance} {currency}\n\nبرای دریافت شماره جدید از دکمه زیر استفاده کنید:",
                 reply_markup=reply_markup
             )
         else:
-            query.edit_message_text("❌ خطا در بررسی موجودی")
+            bot.edit_message_text(
+                chat_id=query.message.chat_id,
+                message_id=query.message.message_id,
+                text="❌ خطا در بررسی موجودی"
+            )
             
     except Exception as e:
         logger.error(f"Error in check_balance: {e}")
-        query.edit_message_text("❌ خطا در ارتباط با سرور")
+        bot.edit_message_text(
+            chat_id=query.message.chat_id,
+            message_id=query.message.message_id,
+            text="❌ خطا در ارتباط با سرور"
+        )
 
 def main():
     logger.info("🚀 Starting Telegram Bot...")
     
     try:
-        # ساخت آپدیتور بدون use_context
-        updater = Updater(BOT_TOKEN)
-        dispatcher = updater.dispatcher
+        # ساخت ریکوئست
+        request = Request(con_pool_size=8)
+        
+        # ساخت بات
+        bot = Bot(token=BOT_TOKEN, request=request)
+        
+        # ساخت آپدیتور
+        updater = Updater(bot=bot, use_context=False)
+        
+        # گرفتن دیسپچر
+        dp = updater.dispatcher
         
         # اضافه کردن هندلرها
-        dispatcher.add_handler(CommandHandler("start", start))
-        dispatcher.add_handler(CallbackQueryHandler(handle_callback))
+        dp.add_handler(CommandHandler("start", start))
+        dp.add_handler(CallbackQueryHandler(handle_callback))
         
         logger.info("✅ Bot is running and polling...")
         updater.start_polling()
