@@ -15,7 +15,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # چک کردن متغیرهای محیطی
-BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8392055613:AAGCVLg7iVCOSXkSQU4TSAS111BV6GTM34s")
+BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8392055613:AAGcvLg7iVCo5XkSQU4T5Asll1BV6GTm34s")
 API_KEY = os.environ.get("GRIZZLYSMS_API_KEY", "561cab8ebb259d7d1e65fb83b6807484")
 
 print("=" * 50)
