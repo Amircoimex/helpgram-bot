@@ -4,7 +4,7 @@ import requests
 import re
 import time
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, CallbackContext
+from telegram.ext import Updater, CommandHandler, CallbackQueryHandler
 
 # تنظیم لاگ
 logging.basicConfig(
@@ -25,7 +25,7 @@ print("=" * 50)
 
 user_sessions = {}
 
-def start(update: Update, context: CallbackContext):
+def start(update, context):
     keyboard = [
         [InlineKeyboardButton("📱 دریافت شماره تونس", callback_data="get_number")],
         [InlineKeyboardButton("💰 بررسی موجودی", callback_data="check_balance")]
@@ -37,7 +37,7 @@ def start(update: Update, context: CallbackContext):
         reply_markup=reply_markup
     )
 
-def handle_callback(update: Update, context: CallbackContext):
+def handle_callback(update, context):
     query = update.callback_query
     query.answer()
     user_id = query.from_user.id
@@ -51,7 +51,7 @@ def handle_callback(update: Update, context: CallbackContext):
     elif query.data == "back":
         start_callback(update, context)
 
-def start_callback(update: Update, context: CallbackContext):
+def start_callback(update, context):
     query = update.callback_query
     keyboard = [
         [InlineKeyboardButton("📱 دریافت شماره تونس", callback_data="get_number")],
@@ -202,9 +202,11 @@ def main():
     logger.info("🚀 Starting Telegram Bot...")
     
     try:
-        updater = Updater(BOT_TOKEN, use_context=True)
+        # ساخت آپدیتور بدون use_context
+        updater = Updater(BOT_TOKEN)
         dispatcher = updater.dispatcher
         
+        # اضافه کردن هندلرها
         dispatcher.add_handler(CommandHandler("start", start))
         dispatcher.add_handler(CallbackQueryHandler(handle_callback))
         
