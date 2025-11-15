@@ -3,6 +3,7 @@ import logging
 import requests
 import re
 import time
+import telegram
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Updater, CommandHandler, CallbackQueryHandler
 
@@ -32,8 +33,9 @@ def start(bot, update):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    update.message.reply_text(
-        "🤖 به ربات دریافت شماره تونس خوش آمدید!",
+    bot.send_message(
+        chat_id=update.message.chat_id,
+        text="🤖 به ربات دریافت شماره تونس خوش آمدید!",
         reply_markup=reply_markup
     )
 
@@ -202,7 +204,6 @@ def main():
         return
     
     try:
-        # ساخت آپدیتور بدون use_context
         updater = Updater(BOT_TOKEN)
         dp = updater.dispatcher
         
