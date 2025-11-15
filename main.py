@@ -3,6 +3,9 @@ import logging
 import requests
 import re
 import time
+import telegram
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Updater, CommandHandler, CallbackQueryHandler
 
 # تنظیم لاگ
 logging.basicConfig(
@@ -23,15 +26,144 @@ print("=" * 50)
 
 user_sessions = {}
 
-def main():
-    print("🚀 Starting simple bot test...")
-    print("✅ Environment variables are set correctly!")
-    print("🤖 Bot is ready to work!")
+def start(update, context):
+    keyboard = [
+        [InlineKeyboardButton("📱 دریافت شماره تونس", callback_data="get_number")],
+        [InlineKeyboardButton("💰 بررسی موجودی", callback_data="check_balance")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
     
-    # نگه داشتن کانتینر فعال
-    while True:
-        time.sleep(60)
-        print("⏳ Bot container is running...")
+    update.message.reply_text(
+        "🤖 به ربات دریافت شماره تونس خوش آمدید!",
+        reply_markup=reply_markup
+    )
+
+def button_handler(update, context):
+    query = update.callback_query
+    query.answer()
+    user_id = query.from_user.id
+    
+    if query.data == "get_number":
+        get_number(query, user_id)
+    elif query.data == "check_balance":
+        check_balance(query)
+    elif query.data == "get_code":
+        get_sms_code(query, user_id)
+
+def get_number(query, user_id):
+    try:
+        query.edit_message_text("📞 درحال دریافت شماره...")
+        
+        url = "https://grizzlysms.com/api/v1/order"
+        params = {"key": API_KEY, "service": "telegram", "country": "tn"}
+        
+        response = requests.get(url, params=params, timeout=30)
+        data = response.json()
+        
+        if data.get("status") == "success":
+            phone_number = data["data"]["number"]
+            order_id = data["data"]["order_id"]
+            
+            user_sessions[user_id] = {"order_id": order_id, "phone_number": phone_number}
+            
+            keyboard = [
+                [InlineKeyboardButton("🔄 دریافت کد", callback_data="get_code")],
+                [InlineKeyboardButton("🔙 برگشت", callback_data="back")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            query.edit_message_text(
+                f"✅ شماره دریافت شد:\n`{phone_number}`\n\nاین شماره رو در تلگرام وارد کن.",
+                reply_markup=reply_markup,
+                parse_mode="Markdown"
+            )
+        else:
+            query.edit_message_text("❌ خطا در دریافت شماره")
+            
+    except Exception as e:
+        logger.error(f"Error: {e}")
+        query.edit_message_text("❌ خطا در ارتباط")
+
+def get_sms_code(query, user_id):
+    try:
+        if user_id not in user_sessions:
+            query.edit_message_text("❌ session منقضی شده")
+            return
+            
+        order_id = user_sessions[user_id]["order_id"]
+        phone_number = user_sessions[user_id]["phone_number"]
+        
+        query.edit_message_text("⏳ درحال دریافت کد...")
+        
+        url = "https://grizzlysms.com/api/v1/sms"
+        params = {"key": API_KEY, "order_id": order_id}
+        
+        for i in range(12):
+            response = requests.get(url, params=params, timeout=15)
+            data = response.json()
+            
+            if data.get("status") == "success" and data["data"].get("sms"):
+                sms_code = data["data"]["sms"]
+                code_match = re.search(r'\b\d{4,6}\b', sms_code)
+                
+                if code_match:
+                    final_code = code_match.group()
+                else:
+                    final_code = sms_code
+                
+                del user_sessions[user_id]
+                query.edit_message_text(f"✅ کد دریافت شد:\n`{final_code}`", parse_mode="Markdown")
+                return
+            
+            time.sleep(10)
+        
+        query.edit_message_text("❌ کد دریافت نشد")
+        
+    except Exception as e:
+        logger.error(f"Error: {e}")
+        query.edit_message_text("❌ خطا در دریافت کد")
+
+def check_balance(query):
+    try:
+        query.edit_message_text("💰 درحال بررسی موجودی...")
+        
+        url = "https://grizzlysms.com/api/v1/balance"
+        params = {"key": API_KEY}
+        
+        response = requests.get(url, params=params, timeout=10)
+        data = response.json()
+        
+        if data.get("status") == "success":
+            balance = data["data"].get("balance", 0)
+            currency = data["data"].get("currency", "USD")
+            query.edit_message_text(f"💰 موجودی: {balance} {currency}")
+        else:
+            query.edit_message_text("❌ خطا در بررسی موجودی")
+            
+    except Exception as e:
+        logger.error(f"Error: {e}")
+        query.edit_message_text("❌ خطا در ارتباط")
+
+def main():
+    logger.info("🚀 Starting Bot...")
+    
+    if not BOT_TOKEN:
+        logger.error("❌ BOT_TOKEN not set!")
+        return
+    
+    try:
+        updater = Updater(BOT_TOKEN, use_context=True)
+        dp = updater.dispatcher
+        
+        dp.add_handler(CommandHandler("start", start))
+        dp.add_handler(CallbackQueryHandler(button_handler))
+        
+        logger.info("✅ Bot is running...")
+        updater.start_polling()
+        updater.idle()
+        
+    except Exception as e:
+        logger.error(f"❌ Error: {e}")
 
 if __name__ == "__main__":
     main()
