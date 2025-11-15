@@ -1,12 +1,16 @@
 import os
 import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 import requests
 import re
+import time
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, CallbackContext
 
 # تنظیم لاگ
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 logger = logging.getLogger(__name__)
 
 # چک کردن متغیرهای محیطی
@@ -21,31 +25,48 @@ print("=" * 50)
 
 user_sessions = {}
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def start(update: Update, context: CallbackContext):
     keyboard = [
         [InlineKeyboardButton("📱 دریافت شماره تونس", callback_data="get_number")],
         [InlineKeyboardButton("💰 بررسی موجودی", callback_data="check_balance")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await update.message.reply_text(
+    update.message.reply_text(
         "🤖 به ربات دریافت شماره تونس خوش آمدید!",
         reply_markup=reply_markup
     )
 
-async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def handle_callback(update: Update, context: CallbackContext):
     query = update.callback_query
-    await query.answer()
+    query.answer()
     user_id = query.from_user.id
     
     if query.data == "get_number":
-        await get_number(query, user_id)
+        get_number(query, user_id)
     elif query.data == "check_balance":
-        await check_balance(query)
+        check_balance(query)
+    elif query.data == "get_code":
+        get_sms_code(query, user_id)
+    elif query.data == "back":
+        start_callback(update, context)
 
-async def get_number(query, user_id):
+def start_callback(update: Update, context: CallbackContext):
+    query = update.callback_query
+    keyboard = [
+        [InlineKeyboardButton("📱 دریافت شماره تونس", callback_data="get_number")],
+        [InlineKeyboardButton("💰 بررسی موجودی", callback_data="check_balance")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    query.edit_message_text(
+        "🤖 به ربات دریافت شماره تونس خوش آمدید!",
+        reply_markup=reply_markup
+    )
+
+def get_number(query, user_id):
     try:
-        await query.edit_message_text("📞 درحال دریافت شماره...")
+        query.edit_message_text("📞 درحال دریافت شماره...")
         
         url = "https://grizzlysms.com/api/v1/order"
         params = {"key": API_KEY, "service": "telegram", "country": "tn"}
@@ -53,71 +74,100 @@ async def get_number(query, user_id):
         response = requests.get(url, params=params, timeout=30)
         data = response.json()
         
+        logger.info(f"API Response: {data}")
+        
         if data.get("status") == "success":
             phone_number = data["data"]["number"]
             order_id = data["data"]["order_id"]
             
-            user_sessions[user_id] = {"order_id": order_id, "phone_number": phone_number}
+            user_sessions[user_id] = {
+                "order_id": order_id,
+                "phone_number": phone_number
+            }
             
             keyboard = [
-                [InlineKeyboardButton("🔄 دریافت کد", callback_data="get_code")],
+                [InlineKeyboardButton("🔄 دریافت کد تأیید", callback_data="get_code")],
                 [InlineKeyboardButton("🔙 برگشت", callback_data="back")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             
-            await query.edit_message_text(
-                f"✅ شماره دریافت شد:\n`{phone_number}`\n\nاین شماره رو در تلگرام وارد کن.",
+            query.edit_message_text(
+                f"✅ **شماره دریافت شد!**\n\n"
+                f"📱 **شماره:** `{phone_number}`\n"
+                f"🆔 **Order ID:** `{order_id}`\n\n"
+                f"📝 این شماره را در تلگرام وارد کنید و سپس روی 'دریافت کد تأیید' کلیک کنید.",
                 reply_markup=reply_markup,
                 parse_mode="Markdown"
             )
         else:
-            await query.edit_message_text("❌ خطا در دریافت شماره")
+            error_msg = data.get('message', 'خطای ناشناخته')
+            query.edit_message_text(f"❌ خطا در دریافت شماره: {error_msg}")
             
     except Exception as e:
-        await query.edit_message_text("❌ خطا در ارتباط")
+        logger.error(f"Error in get_number: {e}")
+        query.edit_message_text("❌ خطا در ارتباط با سرور")
 
-async def get_sms_code(query, user_id):
+def get_sms_code(query, user_id):
     try:
         if user_id not in user_sessions:
-            await query.edit_message_text("❌ session منقضی شده")
+            query.edit_message_text("❌ session شما منقضی شده است. لطفاً دوباره شروع کنید.")
             return
             
         order_id = user_sessions[user_id]["order_id"]
         phone_number = user_sessions[user_id]["phone_number"]
         
-        await query.edit_message_text("⏳ درحال دریافت کد...")
+        query.edit_message_text("⏳ در حال دریافت کد تأیید... لطفاً منتظر بمانید.")
         
         url = "https://grizzlysms.com/api/v1/sms"
         params = {"key": API_KEY, "order_id": order_id}
         
         for i in range(12):
-            response = requests.get(url, params=params, timeout=15)
-            data = response.json()
-            
-            if data.get("status") == "success" and data["data"].get("sms"):
-                sms_code = data["data"]["sms"]
-                code_match = re.search(r'\b\d{4,6}\b', sms_code)
+            try:
+                response = requests.get(url, params=params, timeout=15)
+                data = response.json()
                 
-                if code_match:
-                    final_code = code_match.group()
-                else:
-                    final_code = sms_code
+                if data.get("status") == "success" and data["data"].get("sms"):
+                    sms_code = data["data"]["sms"]
+                    code_match = re.search(r'\b\d{4,6}\b', sms_code)
+                    
+                    if code_match:
+                        final_code = code_match.group()
+                    else:
+                        final_code = sms_code
+                    
+                    del user_sessions[user_id]
+                    
+                    keyboard = [
+                        [InlineKeyboardButton("📱 دریافت شماره جدید", callback_data="get_number")],
+                        [InlineKeyboardButton("🔙 برگشت", callback_data="back")]
+                    ]
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                    
+                    query.edit_message_text(
+                        f"🎉 **کد تأیید دریافت شد!**\n\n"
+                        f"📱 **شماره:** `{phone_number}`\n"
+                        f"🔢 **کد تأیید:** `{final_code}`\n\n"
+                        f"✅ این کد را در تلگرام وارد کنید.",
+                        reply_markup=reply_markup,
+                        parse_mode="Markdown"
+                    )
+                    return
                 
-                del user_sessions[user_id]
-                await query.edit_message_text(f"✅ کد دریافت شد:\n`{final_code}`", parse_mode="Markdown")
-                return
-            
-            import asyncio
-            await asyncio.sleep(10)
+                time.sleep(10)
+                
+            except Exception as e:
+                logger.error(f"Error checking SMS: {e}")
+                time.sleep(10)
         
-        await query.edit_message_text("❌ کد دریافت نشد")
+        query.edit_message_text("❌ کد تأیید دریافت نشد. لطفاً دوباره تلاش کنید.")
         
     except Exception as e:
-        await query.edit_message_text("❌ خطا در دریافت کد")
+        logger.error(f"Error in get_sms_code: {e}")
+        query.edit_message_text("❌ خطا در دریافت کد")
 
-async def check_balance(query):
+def check_balance(query):
     try:
-        await query.edit_message_text("💰 درحال بررسی موجودی...")
+        query.edit_message_text("💰 در حال بررسی موجودی...")
         
         url = "https://grizzlysms.com/api/v1/balance"
         params = {"key": API_KEY}
@@ -128,30 +178,42 @@ async def check_balance(query):
         if data.get("status") == "success":
             balance = data["data"].get("balance", 0)
             currency = data["data"].get("currency", "USD")
-            await query.edit_message_text(f"💰 موجودی: {balance} {currency}")
+            
+            keyboard = [
+                [InlineKeyboardButton("📱 دریافت شماره", callback_data="get_number")],
+                [InlineKeyboardButton("🔙 برگشت", callback_data="back")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            query.edit_message_text(
+                f"💳 **موجودی حساب:**\n\n"
+                f"💰 **مبلغ:** {balance} {currency}\n\n"
+                f"برای دریافت شماره جدید از دکمه زیر استفاده کنید:",
+                reply_markup=reply_markup
+            )
         else:
-            await query.edit_message_text("❌ خطا در بررسی موجودی")
+            query.edit_message_text("❌ خطا در بررسی موجودی")
             
     except Exception as e:
-        await query.edit_message_text("❌ خطا در ارتباط")
+        logger.error(f"Error in check_balance: {e}")
+        query.edit_message_text("❌ خطا در ارتباط با سرور")
 
 def main():
-    print("🚀 Starting Bot...")
-    
-    if not BOT_TOKEN:
-        print("❌ BOT_TOKEN not set!")
-        return
+    logger.info("🚀 Starting Telegram Bot...")
     
     try:
-        application = Application.builder().token(BOT_TOKEN).build()
-        application.add_handler(CommandHandler("start", start))
-        application.add_handler(CallbackQueryHandler(handle_callback))
+        updater = Updater(BOT_TOKEN, use_context=True)
+        dispatcher = updater.dispatcher
         
-        print("✅ Bot is running...")
-        application.run_polling()
+        dispatcher.add_handler(CommandHandler("start", start))
+        dispatcher.add_handler(CallbackQueryHandler(handle_callback))
+        
+        logger.info("✅ Bot is running and polling...")
+        updater.start_polling()
+        updater.idle()
         
     except Exception as e:
-        print(f"❌ Error: {e}")
+        logger.error(f"❌ Failed to start bot: {e}")
 
 if __name__ == "__main__":
     main()
