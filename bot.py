@@ -69,7 +69,7 @@ async def get_tunisian_number(query, user_id):
             # ذخیره اطلاعات کاربر
             user_sessions[user_id] = {
                 "order_id": order_id,
-                "phone_number": phone_number",
+                "phone_number": phone_number,  # اینجا ویرایش شد
                 "status": "waiting_for_code"
             }
             
